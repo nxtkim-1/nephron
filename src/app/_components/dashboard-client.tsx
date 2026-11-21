@@ -1,100 +1,43 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import Link from "next/link";
+import {
+  CartesianGrid,
+  ComposedChart,
+  Legend,
+  Line,
+  ReferenceLine,
+  ResponsiveContainer,
+  Scatter,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
 
 import { api } from "~/trpc/react";
 
-const SEASON_LABELS: Record<string, { label: string; badge: string }> = {
-  startup: { label: "Start-up (April)", badge: "bg-sky-100 text-sky-900" },
-  spray: { label: "Spray Season (May–Jul)", badge: "bg-purple-100 text-purple-900" },
-  late_summer: {
-    label: "Late Summer (Aug–Sep)",
-    badge: "bg-amber-100 text-amber-900",
-  },
-  off_season: {
-    label: "Off-Season (Bypass)",
-    badge: "bg-slate-200 text-slate-800",
-  },
-};
-
-const ALERT_BADGES: Record<string, string> = {
-  storm_hold: "bg-purple-100 text-purple-900",
-  swap_soon: "bg-amber-100 text-amber-900",
-  nitrate_breakthrough: "bg-red-100 text-red-900",
-  clogging: "bg-orange-100 text-orange-900",
-  ice: "bg-sky-100 text-sky-900",
-};
-
-function formatDateTime(iso: string) {
-  const d = new Date(iso);
-  return d.toLocaleString("en-US", {
+function formatShortDate(iso: string) {
+  return new Date(iso).toLocaleDateString("en-US", {
     month: "short",
     day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
     timeZone: "UTC",
   });
 }
 
-function cartridgeBarColor(fraction: number) {
-  if (fraction >= 0.85) return "bg-red-500";
-  if (fraction >= 0.6) return "bg-amber-500";
-  return "bg-emerald-500";
-}
-
-function CartridgeBar({
-  label,
-  twinFrac,
-  truthFrac,
-  showTruth,
-}: {
-  label: string;
-  twinFrac: number;
-  truthFrac: number;
-  showTruth: boolean;
-}) {
-  const pct = Math.round(twinFrac * 100);
-  const truthPct = Math.round(truthFrac * 100);
-
-  return (
-    <div className="space-y-1">
-      <div className="flex items-center justify-between text-xs">
-        <span className="font-medium text-slate-700">{label}</span>
-        <span className="font-mono font-semibold text-slate-900">{pct}%</span>
-      </div>
-      <div className="relative h-3 w-full overflow-hidden rounded-full bg-slate-200">
-        <div
-          className={`h-full transition-all duration-150 ${cartridgeBarColor(twinFrac)}`}
-          style={{ width: `${Math.min(100, Math.max(2, pct))}%` }}
-        />
-        {showTruth && (
-          <div
-            title={`Hidden truth: ${truthPct}%`}
-            className="absolute top-0 bottom-0 w-0.5 bg-slate-900"
-            style={{ left: `${Math.min(99, Math.max(1, truthPct))}%` }}
-          />
-        )}
-      </div>
-      {showTruth && (
-        <div className="flex justify-between text-[10px] text-slate-500">
-          <span>Twin est.</span>
-          <span>Truth: {truthPct}%</span>
-        </div>
-      )}
-    </div>
-  );
+function barColor(fraction: number) {
+  if (fraction >= 0.85) return "#ef4444"; // red
+  if (fraction >= 0.6) return "#f59e0b"; // amber
+  return "#22c55e"; // green
 }
 
 export function DashboardClient() {
   const utils = api.useUtils();
-  const seriesQuery = api.twin.getSeries.useQuery({ stride: 1 });
+  // Load every 6 hours (~856 points) so the slider and chart are instant and lightweight.
+  const seriesQuery = api.twin.getSeries.useQuery({ stride: 6 });
+  const whatIfQuery = api.whatif.compare.useQuery({ seed: 42 });
 
-  const [seed, setSeed] = useState(42);
-  const [hourIndex, setHourIndex] = useState(1400); // Default mid-spray season (~May 29)
+  const [stepIndex, setStepIndex] = useState(235); // ~May 29
   const [isPlaying, setIsPlaying] = useState(false);
-  const [showTruth, setShowTruth] = useState(true);
-  const [showAllAlerts, setShowAllAlerts] = useState(false);
 
   const runSeason = api.sim.runSeason.useMutation({
     onSuccess: async () => {
@@ -108,442 +51,311 @@ export function DashboardClient() {
     },
   });
 
-  const swapCartridge = api.site.swapCartridge.useMutation({
-    onSuccess: async () => {
-      await utils.twin.getSeries.invalidate();
-    },
-  });
-
-  const points = useMemo(() => seriesQuery.data?.points ?? [], [seriesQuery.data?.points]);
+  const points = useMemo(
+    () => seriesQuery.data?.points ?? [],
+    [seriesQuery.data?.points],
+  );
   const maxIndex = Math.max(0, points.length - 1);
-
-  // Keep slider index in bounds when data reloads.
-  const safeIndex = Math.min(hourIndex, maxIndex);
+  const safeIndex = Math.min(stepIndex, maxIndex);
   const current = points[safeIndex];
 
-  // Smooth season replay timer (advances 6 hours per tick).
+  // Auto-play smoothly across the season.
   useEffect(() => {
     if (!isPlaying || points.length === 0) return;
     const id = setInterval(() => {
-      setHourIndex((prev) => {
-        if (prev + 6 >= points.length - 1) {
+      setStepIndex((prev) => {
+        if (prev + 4 >= points.length - 1) {
           setIsPlaying(false);
           return points.length - 1;
         }
-        return prev + 6;
+        return prev + 4;
       });
-    }, 120);
+    }, 140);
     return () => clearInterval(id);
   }, [isPlaying, points.length]);
 
-  const activeAlerts = useMemo(() => {
-    const all = seriesQuery.data?.alerts ?? [];
-    if (!current) return all;
-    const currentMs = new Date(current.ts).getTime();
-    return all.filter((a) => {
-      if (a.resolved) return false;
-      if (showAllAlerts) return true;
-      return new Date(a.ts).getTime() <= currentMs;
-    });
-  }, [seriesQuery.data?.alerts, current, showAllAlerts]);
+  // Build one simple chart: Twin vs. Hidden Reality + Weekly Lab Grabs.
+  const chartData = useMemo(() => {
+    const grabs = seriesQuery.data?.grabSamples ?? [];
+    const grabByIdx = new Map<number, number>();
+    for (const g of grabs) {
+      if (g.location !== "outlet") continue;
+      const gMs = new Date(g.ts).getTime();
+      let best = 0;
+      let diff = Infinity;
+      for (let i = 0; i < points.length; i++) {
+        const d = Math.abs(new Date(points[i]!.ts).getTime() - gMs);
+        if (d < diff) {
+          diff = d;
+          best = i;
+        }
+      }
+      grabByIdx.set(best, g.atrazineUgl);
+    }
 
-  const visibleEvents = useMemo(() => {
-    const all = seriesQuery.data?.events ?? [];
-    if (!current) return all.slice(0, 8);
-    const currentMs = new Date(current.ts).getTime();
-    return all.filter((e) => new Date(e.ts).getTime() <= currentMs).slice(0, 8);
-  }, [seriesQuery.data?.events, current]);
+    return points.map((p, i) => ({
+      date: formatShortDate(p.ts),
+      twinC1: Math.round(p.twinC1 * 100),
+      truthC1: Math.round(p.truthC1 * 100),
+      twinOut: p.twinOutletUgl,
+      truthOut: p.truthOutletUgl,
+      labDot: grabByIdx.get(i) ?? null,
+    }));
+  }, [points, seriesQuery.data?.grabSamples]);
+
+  // Latest unresolved alert at or before the current slider time.
+  const latestAlert = useMemo(() => {
+    const all = seriesQuery.data?.alerts ?? [];
+    if (!current) return null;
+    const nowMs = new Date(current.ts).getTime();
+    return (
+      all.find((a) => !a.resolved && new Date(a.ts).getTime() <= nowMs) ?? null
+    );
+  }, [seriesQuery.data?.alerts, current]);
 
   if (seriesQuery.isLoading) {
     return (
-      <div className="rounded-xl border border-slate-200 bg-white p-10 text-center text-slate-600">
-        Loading NEPHRON digital twin from Neon Postgres...
+      <div className="rounded-xl border border-slate-200 bg-white p-10 text-center text-sm text-slate-600">
+        Loading NEPHRON digital twin...
       </div>
     );
   }
 
-  if (!seriesQuery.data?.site || points.length === 0 || !current) {
+  if (!seriesQuery.data?.site || !current) {
     return (
       <div className="rounded-xl border border-purple-200 bg-white p-10 text-center shadow-sm">
-        <div className="mx-auto inline-block rounded-full bg-purple-100 px-3 py-1 text-xs font-semibold text-purple-800">
+        <span className="rounded-full bg-purple-100 px-3 py-1 text-xs font-semibold text-purple-800">
           Synthetic data: demonstration only
-        </div>
-        <h1 className="mt-4 text-2xl font-bold text-slate-900">
-          Seed Your First NEPHRON Season
+        </span>
+        <h1 className="mt-4 text-xl font-bold text-slate-900">
+          Start the NEPHRON Demo
         </h1>
-        <p className="mx-auto mt-2 max-w-xl text-sm text-slate-600">
-          No simulation data is stored in Neon yet. Click below to simulate an
-          entire April–October farming season (5,136 hourly steps) with noisy
-          sensors, delayed weekly lab grab samples, and the learning digital
-          twin.
+        <p className="mx-auto mt-2 max-w-md text-sm text-slate-600">
+          Generate one farming season (April–October) to watch the digital twin
+          track hidden underground carbon filters.
         </p>
         <button
-          onClick={() => runSeason.mutate({ seed })}
+          onClick={() => runSeason.mutate({ seed: 42 })}
           disabled={runSeason.isPending}
-          className="mt-6 rounded-lg bg-purple-700 px-5 py-2.5 text-sm font-semibold text-white hover:bg-purple-800 disabled:opacity-50"
+          className="mt-5 rounded-lg bg-purple-700 px-5 py-2.5 text-sm font-semibold text-white hover:bg-purple-800 disabled:opacity-50"
         >
-          {runSeason.isPending
-            ? "Simulating & writing to Neon..."
-            : "Seed Season Data (Seed #42)"}
+          {runSeason.isPending ? "Generating season..." : "Generate Demo Season"}
         </button>
       </div>
     );
   }
 
-  const activeSite = seriesQuery.data.site;
   const isTreat = current.seasonMode !== "off_season";
-  const seasonMeta =
-    SEASON_LABELS[current.seasonMode] ?? SEASON_LABELS.spray!;
+  const currentDateLabel = formatShortDate(current.ts);
+  const c1H = Math.max(4, Math.round(current.twinC1 * 62));
+  const c2H = Math.max(4, Math.round(current.twinC2 * 62));
+  const polH = Math.max(4, Math.round(current.twinPolish * 62));
+  const c1TH = Math.max(4, Math.round(current.truthC1 * 62));
+  const c2TH = Math.max(4, Math.round(current.truthC2 * 62));
+  const polTH = Math.max(4, Math.round(current.truthPolish * 62));
 
   return (
     <div className="space-y-6">
-      {/* Purple Digital Twin Banner */}
-      <section className="rounded-xl bg-purple-700 p-5 text-white shadow-sm">
-        <div className="flex flex-wrap items-center justify-between gap-4">
-          <div>
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="rounded bg-white/20 px-2 py-0.5 text-xs font-semibold tracking-wide uppercase">
-                Digital Twin
-              </span>
-              <span className="text-xs text-purple-100">
-                Synthetic data: demonstration only
-              </span>
-            </div>
-            <h1 className="mt-1 text-xl font-bold sm:text-2xl">
-              {activeSite.name} ({activeSite.areaHa} ha)
-            </h1>
-            <p className="mt-0.5 text-xs text-purple-100">
-              Replay time: <strong className="text-white">{formatDateTime(current.ts)} UTC</strong>
-              {" · "}
-              Spray date:{" "}
-              <strong className="text-white">
-                {activeSite.sprayDate
-                  ? new Date(activeSite.sprayDate).toISOString().slice(0, 10)
-                  : "Not logged"}
-              </strong>
-              {" · "}
-              Mode: <strong className="text-white">{seasonMeta.label}</strong>
-            </p>
+      {/* Purple Digital Twin Header Banner */}
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-purple-700 px-5 py-3.5 text-white">
+        <div>
+          <div className="text-xs font-semibold tracking-wide text-purple-200 uppercase">
+            Digital Twin &middot; Synthetic data: demonstration only
           </div>
-
-          <div className="flex flex-wrap items-center gap-2">
-            <label className="flex items-center gap-1.5 rounded-lg bg-white/15 px-3 py-1.5 text-xs">
-              <input
-                type="checkbox"
-                checked={showTruth}
-                onChange={(e) => setShowTruth(e.target.checked)}
-                className="accent-white"
-              />
-              Show hidden truth
-            </label>
-
-            <div className="flex items-center gap-1 rounded-lg bg-white/15 px-2 py-1">
-              <span className="text-xs text-purple-100">Seed</span>
-              <input
-                type="number"
-                value={seed}
-                onChange={(e) => setSeed(Math.max(1, Number(e.target.value) || 1))}
-                className="w-16 rounded bg-white/90 px-1.5 py-0.5 text-xs font-mono text-slate-900"
-              />
-              <button
-                onClick={() => runSeason.mutate({ siteId: activeSite.id, seed })}
-                disabled={runSeason.isPending}
-                className="rounded bg-white px-2.5 py-1 text-xs font-semibold text-purple-800 hover:bg-purple-50 disabled:opacity-60"
-              >
-                {runSeason.isPending ? "Seeding..." : "Reseed"}
-              </button>
-            </div>
-
-            <button
-              onClick={() =>
-                swapCartridge.mutate({
-                  siteId: activeSite.id,
-                  ts: new Date(current.ts),
-                })
-              }
-              disabled={swapCartridge.isPending}
-              className="rounded-lg border border-white/40 bg-purple-800 px-3 py-1.5 text-xs font-semibold text-white hover:bg-purple-900 disabled:opacity-60"
-            >
-              {swapCartridge.isPending ? "Logging..." : "Log Cartridge Swap"}
-            </button>
+          <div className="mt-0.5 text-base font-bold sm:text-lg">
+            {currentDateLabel} &mdash;{" "}
+            {isTreat ? "Treating tile drainage" : "Off-season (bypassing filters)"}
           </div>
         </div>
-      </section>
 
-      {/* 6-Box Treatment Schematic */}
-      <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-          <div>
-            <h2 className="text-base font-semibold text-slate-900">
-              NEPHRON Process Flow Schematic
-            </h2>
-            <p className="text-xs text-slate-500">
-              Tile drain &rarr; Inlet box &rarr; Woodchip trench &rarr; Carbon
-              box (C1 &rarr; C2 &rarr; Polish) &rarr; Outlet box &rarr; Ditch
-            </p>
-          </div>
-          <span
-            className={`rounded-full px-3 py-1 text-xs font-semibold ${seasonMeta.badge}`}
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setIsPlaying((p) => !p)}
+            className="rounded-lg bg-white px-3.5 py-1.5 text-xs font-bold text-purple-800 hover:bg-purple-50"
           >
-            Season Board: {isTreat ? "TREAT" : "BYPASS"}
-          </span>
+            {isPlaying ? "Pause" : "Play Season"}
+          </button>
+          <button
+            onClick={() => {
+              const activeSite = seriesQuery.data?.site;
+              if (!activeSite) return;
+              runSeason.mutate({
+                siteId: activeSite.id,
+                seed: Math.floor(1 + Math.random() * 9000),
+              });
+            }}
+            disabled={runSeason.isPending}
+            className="rounded-lg border border-white/40 px-3 py-1.5 text-xs font-semibold text-white hover:bg-purple-800 disabled:opacity-50"
+          >
+            {runSeason.isPending ? "Seeding..." : "New Weather"}
+          </button>
         </div>
+      </div>
 
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-6">
-          {/* Box 1: Tile Drain */}
-          <div className="relative flex flex-col justify-between rounded-lg border border-slate-200 bg-slate-50 p-3.5">
-            <div>
-              <div className="text-[11px] font-semibold tracking-wide text-slate-500 uppercase">
-                Inflow
-              </div>
-              <div className="text-sm font-bold text-slate-900">Tile Drain</div>
-            </div>
-            <div className="mt-3 space-y-1.5 text-xs">
-              <div className="flex justify-between">
-                <span className="text-slate-500">Flow</span>
-                <span className="font-mono font-semibold">
-                  {current.flowLps.toFixed(2)} L/s
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-500">Inlet atrazine</span>
-                <span className="font-mono font-semibold text-purple-700">
-                  {current.inletAtrazineUgl.toFixed(2)} &mu;g/L
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-500">24h rain</span>
-                <span className="font-mono">{current.rainForecastMm24h.toFixed(0)} mm</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-500">Water temp</span>
-                <span className="font-mono">{current.tempC.toFixed(1)} &deg;C</span>
-              </div>
-            </div>
-          </div>
+      {/* Block 1: Simple Visual Flow Graphic + Season Slider */}
+      <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+        <svg
+          viewBox="0 0 720 215"
+          className="h-auto w-full"
+          xmlns="http://www.w3.org/2000/svg"
+        >
+          {/* Background soil band */}
+          <rect x="0" y="34" width="720" height="178" rx="12" fill="#f8fafc" stroke="#e2e8f0" />
+          <line x1="0" y1="34" x2="720" y2="34" stroke="#22c55e" strokeWidth="3" />
+          <text x="14" y="23" fill="#15803d" fontSize="11" fontWeight="700">
+            UNDERGROUND TREATMENT UNIT
+          </text>
+          <text x="706" y="23" textAnchor="end" fill="#6b21a8" fontSize="11" fontWeight="700">
+            Flow: {current.flowLps.toFixed(2)} L/s &middot; Mode: {isTreat ? "TREAT" : "BYPASS"}
+          </text>
 
-          {/* Box 2: Inlet Box */}
-          <div className="flex flex-col justify-between rounded-lg border border-slate-200 bg-slate-50 p-3.5">
-            <div>
-              <div className="text-[11px] font-semibold tracking-wide text-slate-500 uppercase">
-                1. Control
-              </div>
-              <div className="text-sm font-bold text-slate-900">Inlet Box</div>
-            </div>
-            <div className="mt-3 space-y-1.5 text-xs">
-              <div className="flex items-center justify-between">
-                <span className="text-slate-500">Season board</span>
-                <span
-                  className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${
-                    isTreat
-                      ? "bg-emerald-100 text-emerald-800"
-                      : "bg-slate-200 text-slate-700"
-                  }`}
-                >
-                  {isTreat ? "TREAT" : "BYPASS"}
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-500">Inlet level</span>
-                <span className="font-mono">{current.inletLevelM.toFixed(2)} m</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-500">Hydraulic cap</span>
-                <span className="font-mono">3.5 L/s</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-500">Basin</span>
-                <span className="font-mono">300 m&sup3;</span>
-              </div>
-            </div>
-          </div>
+          {/* 1. Tile Drain */}
+          <rect x="14" y="84" width="96" height="72" rx="10" fill="#ffffff" stroke="#cbd5e1" strokeWidth="1.5" />
+          <text x="62" y="106" textAnchor="middle" fill="#64748b" fontSize="9.5" fontWeight="700">
+            TILE DRAIN
+          </text>
+          <text x="62" y="127" textAnchor="middle" fill="#7e22ce" fontSize="14" fontWeight="800">
+            {current.inletAtrazineUgl.toFixed(1)} &mu;g/L
+          </text>
+          <text x="62" y="143" textAnchor="middle" fill="#64748b" fontSize="9.5">
+            Atrazine in
+          </text>
 
-          {/* Box 3: Woodchip Trench */}
-          <div className="flex flex-col justify-between rounded-lg border border-slate-200 bg-slate-50 p-3.5">
-            <div>
-              <div className="text-[11px] font-semibold tracking-wide text-slate-500 uppercase">
-                2. Denitrification
-              </div>
-              <div className="text-sm font-bold text-slate-900">
-                Woodchip Trench
-              </div>
-            </div>
-            <div className="mt-3 space-y-1.5 text-xs">
-              <div className="flex justify-between">
-                <span className="text-slate-500">Nitrate out</span>
-                <span
-                  className={`font-mono font-semibold ${
-                    current.nitrateAfterChipsMgl > 5
-                      ? "text-red-600"
-                      : "text-emerald-700"
-                  }`}
-                >
-                  {current.nitrateAfterChipsMgl.toFixed(1)} mg/L
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-500">Atrazine cut</span>
-                <span className="font-mono">25%</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-500">UV254 (DOM)</span>
-                <span className="font-mono">{current.uv254.toFixed(3)}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-500">Turbidity</span>
-                <span className="font-mono">{current.turbidityNtu.toFixed(1)} NTU</span>
-              </div>
-            </div>
-          </div>
+          {/* Arrow 1 -> 2 */}
+          <line x1="110" y1="120" x2="138" y2="120" stroke="#9333ea" strokeWidth="4" />
+          <polygon points="138,114 148,120 138,126" fill="#9333ea" />
 
-          {/* Box 4: Carbon Box (3 cartridges with fill bars) */}
-          <div className="flex flex-col justify-between rounded-lg border-2 border-purple-400 bg-purple-50/40 p-3.5">
-            <div>
-              <div className="text-[11px] font-semibold tracking-wide text-purple-700 uppercase">
-                3. Adsorption
-              </div>
-              <div className="text-sm font-bold text-slate-900">Carbon Box</div>
-            </div>
-            <div className="mt-2.5 space-y-2">
-              <CartridgeBar
-                label="Carbon 1"
-                twinFrac={current.twinC1}
-                truthFrac={current.truthC1}
-                showTruth={showTruth}
-              />
-              <CartridgeBar
-                label="Carbon 2"
-                twinFrac={current.twinC2}
-                truthFrac={current.truthC2}
-                showTruth={showTruth}
-              />
-              <CartridgeBar
-                label="Polish"
-                twinFrac={current.twinPolish}
-                truthFrac={current.truthPolish}
-                showTruth={showTruth}
-              />
-            </div>
-            <div className="mt-2 flex justify-between border-t border-purple-200 pt-1.5 text-[11px]">
-              <span className="text-slate-600">After C2</span>
-              <span className="font-mono font-semibold text-purple-900">
-                {current.twinAfterC2Ugl.toFixed(3)} &mu;g/L
-              </span>
-            </div>
-          </div>
+          {/* 2. Inlet Gate */}
+          <rect x="148" y="84" width="88" height="72" rx="10" fill="#ffffff" stroke="#cbd5e1" strokeWidth="1.5" />
+          <text x="192" y="105" textAnchor="middle" fill="#64748b" fontSize="9.5" fontWeight="700">
+            INLET BOX
+          </text>
+          <rect
+            x="164"
+            y="113"
+            width="56"
+            height="22"
+            rx="6"
+            fill={isTreat ? "#dcfce7" : "#e2e8f0"}
+          />
+          <text
+            x="192"
+            y="128"
+            textAnchor="middle"
+            fill={isTreat ? "#166534" : "#334155"}
+            fontSize="10.5"
+            fontWeight="800"
+          >
+            {isTreat ? "TREAT" : "BYPASS"}
+          </text>
+          <text x="192" y="148" textAnchor="middle" fill="#64748b" fontSize="9">
+            300 m&sup3; basin
+          </text>
 
-          {/* Box 5: Outlet Box */}
-          <div className="flex flex-col justify-between rounded-lg border border-slate-200 bg-slate-50 p-3.5">
-            <div>
-              <div className="text-[11px] font-semibold tracking-wide text-slate-500 uppercase">
-                4. Effluent
-              </div>
-              <div className="text-sm font-bold text-slate-900">Outlet Box</div>
-            </div>
-            <div className="mt-3 space-y-1.5 text-xs">
-              <div className="flex justify-between">
-                <span className="text-slate-500">Twin outlet</span>
-                <span className="font-mono font-bold text-purple-700">
-                  {current.twinOutletUgl.toFixed(3)} &mu;g/L
-                </span>
-              </div>
-              {showTruth && (
-                <div className="flex justify-between">
-                  <span className="text-slate-500">Truth outlet</span>
-                  <span className="font-mono font-semibold text-emerald-700">
-                    {current.truthOutletUgl.toFixed(3)} &mu;g/L
-                  </span>
-                </div>
-              )}
-              <div className="flex justify-between">
-                <span className="text-slate-500">Status</span>
-                <span
-                  className={`font-semibold ${
-                    current.twinOutletUgl > 0.3
-                      ? "text-amber-700"
-                      : "text-emerald-700"
-                  }`}
-                >
-                  {isTreat ? "Treating" : "Bypassed"}
-                </span>
-              </div>
-            </div>
-          </div>
+          {/* Arrow 2 -> 3 */}
+          <line
+            x1="236"
+            y1="120"
+            x2="262"
+            y2="120"
+            stroke={isTreat ? "#9333ea" : "#cbd5e1"}
+            strokeWidth="4"
+          />
+          <polygon
+            points="262,114 272,120 262,126"
+            fill={isTreat ? "#9333ea" : "#cbd5e1"}
+          />
 
-          {/* Box 6: Ditch */}
-          <div className="flex flex-col justify-between rounded-lg border border-slate-200 bg-slate-50 p-3.5">
-            <div>
-              <div className="text-[11px] font-semibold tracking-wide text-slate-500 uppercase">
-                Receiving Water
-              </div>
-              <div className="text-sm font-bold text-slate-900">
-                Drainage Ditch
-              </div>
-            </div>
-            <div className="mt-3 space-y-1.5 text-xs">
-              <div className="flex justify-between">
-                <span className="text-slate-500">Removed (cum)</span>
-                <span className="font-mono font-bold text-emerald-700">
-                  {current.twinRemovedMg.toFixed(0)} mg
-                </span>
-              </div>
-              {showTruth && (
-                <div className="flex justify-between">
-                  <span className="text-slate-500">Truth removed</span>
-                  <span className="font-mono text-slate-700">
-                    {current.truthRemovedMg.toFixed(0)} mg
-                  </span>
-                </div>
-              )}
-              <div className="flex justify-between">
-                <span className="text-slate-500">Bypassed (cum)</span>
-                <span className="font-mono font-semibold text-slate-800">
-                  {current.twinBypassM3.toFixed(0)} m&sup3;
-                </span>
-              </div>
-            </div>
-          </div>
-        </div>
+          {/* 3. Woodchips */}
+          <rect x="272" y="84" width="104" height="72" rx="10" fill="#fffbeb" stroke="#fcd34d" strokeWidth="1.5" />
+          <text x="324" y="105" textAnchor="middle" fill="#92400e" fontSize="9.5" fontWeight="700">
+            WOODCHIPS
+          </text>
+          <text
+            x="324"
+            y="127"
+            textAnchor="middle"
+            fill={current.nitrateAfterChipsMgl > 5 ? "#dc2626" : "#15803d"}
+            fontSize="13.5"
+            fontWeight="800"
+          >
+            {current.nitrateAfterChipsMgl.toFixed(1)} mg/L
+          </text>
+          <text x="324" y="143" textAnchor="middle" fill="#92400e" fontSize="9.5">
+            Nitrate out
+          </text>
 
-        {/* Time Replay Slider */}
-        <div className="mt-5 rounded-lg border border-slate-200 bg-slate-50 p-4">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => setIsPlaying((p) => !p)}
-                className="rounded-md bg-purple-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-purple-800"
-              >
-                {isPlaying ? "Pause" : "Play Season"}
-              </button>
-              <span className="text-xs font-medium text-slate-700">
-                Hour {safeIndex + 1} / {points.length} &mdash;{" "}
-                <strong className="font-mono">{formatDateTime(current.ts)} UTC</strong>
-              </span>
-            </div>
+          {/* Arrow 3 -> 4 */}
+          <line
+            x1="376"
+            y1="120"
+            x2="402"
+            y2="120"
+            stroke={isTreat ? "#9333ea" : "#cbd5e1"}
+            strokeWidth="4"
+          />
+          <polygon
+            points="402,114 412,120 402,126"
+            fill={isTreat ? "#9333ea" : "#cbd5e1"}
+          />
 
-            <div className="flex flex-wrap gap-1.5 text-xs">
-              {[
-                { label: "Start-up", idx: 72 },
-                { label: "Spray Day", idx: 39 * 24 },
-                { label: "First Flush", idx: 50 * 24 },
-                { label: "Mid-Summer", idx: 105 * 24 },
-                { label: "Late Summer", idx: 145 * 24 },
-                { label: "Off-Season", idx: 195 * 24 },
-              ].map((preset) => (
-                <button
-                  key={preset.label}
-                  onClick={() => {
-                    setIsPlaying(false);
-                    setHourIndex(Math.min(maxIndex, preset.idx));
-                  }}
-                  className="rounded border border-slate-300 bg-white px-2 py-1 text-slate-700 hover:border-purple-400 hover:text-purple-800"
-                >
-                  {preset.label}
-                </button>
-              ))}
-            </div>
-          </div>
+          {/* 4. Carbon Box (3 cartridges) */}
+          <rect x="412" y="54" width="164" height="132" rx="12" fill="#faf5ff" stroke="#9333ea" strokeWidth="2" />
+          <text x="494" y="72" textAnchor="middle" fill="#6b21a8" fontSize="10" fontWeight="800">
+            CARBON FILTERS
+          </text>
 
+          {/* C1 */}
+          <text x="444" y="88" textAnchor="middle" fill="#475569" fontSize="9" fontWeight="700">C1</text>
+          <rect x="426" y="93" width="36" height="66" rx="5" fill="#e2e8f0" />
+          <rect x="428" y={157 - c1H} width="32" height={c1H} rx="3" fill={barColor(current.twinC1)} />
+          <line x1="426" y1={157 - c1TH} x2="462" y2={157 - c1TH} stroke="#0f172a" strokeWidth="2" strokeDasharray="3 2" />
+          <text x="444" y="174" textAnchor="middle" fill="#0f172a" fontSize="10" fontWeight="700">
+            {Math.round(current.twinC1 * 100)}%
+          </text>
+
+          {/* C2 */}
+          <text x="494" y="88" textAnchor="middle" fill="#475569" fontSize="9" fontWeight="700">C2</text>
+          <rect x="476" y="93" width="36" height="66" rx="5" fill="#e2e8f0" />
+          <rect x="478" y={157 - c2H} width="32" height={c2H} rx="3" fill={barColor(current.twinC2)} />
+          <line x1="476" y1={157 - c2TH} x2="512" y2={157 - c2TH} stroke="#0f172a" strokeWidth="2" strokeDasharray="3 2" />
+          <text x="494" y="174" textAnchor="middle" fill="#0f172a" fontSize="10" fontWeight="700">
+            {Math.round(current.twinC2 * 100)}%
+          </text>
+
+          {/* Polish */}
+          <text x="544" y="88" textAnchor="middle" fill="#475569" fontSize="9" fontWeight="700">POL</text>
+          <rect x="526" y="93" width="36" height="66" rx="5" fill="#e2e8f0" />
+          <rect x="528" y={157 - polH} width="32" height={polH} rx="3" fill={barColor(current.twinPolish)} />
+          <line x1="526" y1={157 - polTH} x2="562" y2={157 - polTH} stroke="#0f172a" strokeWidth="2" strokeDasharray="3 2" />
+          <text x="544" y="174" textAnchor="middle" fill="#0f172a" fontSize="10" fontWeight="700">
+            {Math.round(current.twinPolish * 100)}%
+          </text>
+
+          {/* Arrow 4 -> 5 */}
+          <line x1="576" y1="120" x2="602" y2="120" stroke="#0ea5e9" strokeWidth="4" />
+          <polygon points="602,114 612,120 602,126" fill="#0ea5e9" />
+
+          {/* 5. Outlet / Ditch */}
+          <rect x="612" y="84" width="94" height="72" rx="10" fill="#f0f9ff" stroke="#38bdf8" strokeWidth="1.5" />
+          <text x="659" y="105" textAnchor="middle" fill="#0369a1" fontSize="9.5" fontWeight="700">
+            CLEAN DITCH
+          </text>
+          <text x="659" y="127" textAnchor="middle" fill="#0284c7" fontSize="14" fontWeight="800">
+            {current.twinOutletUgl.toFixed(2)} &mu;g/L
+          </text>
+          <text x="659" y="143" textAnchor="middle" fill="#0369a1" fontSize="9.5">
+            Truth: {current.truthOutletUgl.toFixed(2)}
+          </text>
+
+          {/* Simple legend */}
+          <text x="14" y="202" fill="#64748b" fontSize="9.5">
+            Colored bars = Digital Twin estimate (green &lt;60%, amber 60–85%, red &gt;85%) &middot; Dashed line = hidden real filter
+          </text>
+        </svg>
+
+        {/* Simple Season Slider */}
+        <div className="mt-4 flex flex-col gap-1.5">
           <input
             type="range"
             min={0}
@@ -551,117 +363,133 @@ export function DashboardClient() {
             value={safeIndex}
             onChange={(e) => {
               setIsPlaying(false);
-              setHourIndex(Number(e.target.value));
+              setStepIndex(Number(e.target.value));
             }}
-            className="mt-3 w-full accent-purple-700"
+            className="w-full accent-purple-700"
           />
-          <div className="flex justify-between text-[11px] text-slate-500">
-            <span>Apr 1</span>
-            <span>May 10 (Spray)</span>
-            <span>Jul 1</span>
-            <span>Sep 1</span>
-            <span>Oct 31</span>
+          <div className="flex justify-between text-xs text-slate-500">
+            <span>Apr 1 (Start-up)</span>
+            <span>May 10 (Spray Day)</span>
+            <span>Jul–Sep (Swaps)</span>
+            <span>Oct 31 (Off-Season)</span>
           </div>
         </div>
       </section>
 
-      {/* Alerts & Events */}
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-          <div className="mb-3 flex items-center justify-between">
-            <h2 className="text-base font-semibold text-slate-900">
-              Active Farmer Alerts ({activeAlerts.length})
+      {/* Block 2: One Simple Chart — Twin Estimate vs. Hidden Reality */}
+      <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
+          <div>
+            <h2 className="text-base font-bold text-slate-900">
+              How the Twin Learns: Outlet Atrazine (&mu;g/L)
             </h2>
-            <label className="flex items-center gap-1.5 text-xs text-slate-600">
-              <input
-                type="checkbox"
-                checked={showAllAlerts}
-                onChange={(e) => setShowAllAlerts(e.target.checked)}
-                className="accent-purple-700"
-              />
-              Show full season
-            </label>
-          </div>
-
-          {activeAlerts.length === 0 ? (
-            <p className="rounded-lg bg-slate-50 p-4 text-sm text-slate-500">
-              No unresolved alerts up to this replay timestamp. Scrub forward to
-              inspect storm holds, cartridge swap warnings, nitrate events, or
-              clogging alerts.
+            <p className="text-xs text-slate-500">
+              The twin starts off guessing 30% too slow, then weekly lab samples
+              (orange dots) pull its estimate onto the hidden truth.
             </p>
+          </div>
+          <span className="rounded bg-purple-50 px-2 py-0.5 text-[11px] font-medium text-purple-800">
+            Synthetic data: demonstration only
+          </span>
+        </div>
+
+        <div className="h-60 w-full">
+          <ResponsiveContainer width="100%" height="100%">
+            <ComposedChart data={chartData}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+              <XAxis dataKey="date" tick={{ fontSize: 11 }} minTickGap={35} />
+              <YAxis tick={{ fontSize: 11 }} unit=" ug/L" width={62} />
+              <Tooltip />
+              <Legend wrapperStyle={{ fontSize: 12 }} />
+              <ReferenceLine
+                x={currentDateLabel}
+                stroke="#9333ea"
+                strokeDasharray="3 3"
+              />
+              <Line
+                type="monotone"
+                dataKey="twinOut"
+                name="Digital Twin Estimate"
+                stroke="#7e22ce"
+                strokeWidth={2.2}
+                dot={false}
+              />
+              <Line
+                type="monotone"
+                dataKey="truthOut"
+                name="Hidden Real Plant"
+                stroke="#10b981"
+                strokeWidth={2}
+                strokeDasharray="5 4"
+                dot={false}
+              />
+              <Scatter
+                dataKey="labDot"
+                name="Weekly Lab Sample"
+                fill="#ea580c"
+              />
+            </ComposedChart>
+          </ResponsiveContainer>
+        </div>
+      </section>
+
+      {/* Block 3: Two Simple Cards — Farmer Action + Why It Matters */}
+      <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
+        <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+          <h2 className="text-sm font-bold tracking-wide text-slate-500 uppercase">
+            What the Farmer Should Do
+          </h2>
+          {latestAlert ? (
+            <div className="mt-3 space-y-3">
+              <div className="inline-block rounded bg-amber-100 px-2 py-0.5 text-xs font-bold text-amber-900 uppercase">
+                {latestAlert.type.replace("_", " ")} &middot;{" "}
+                {formatShortDate(new Date(latestAlert.ts).toISOString())}
+              </div>
+              <p className="text-sm font-medium text-slate-900">
+                {latestAlert.message}
+              </p>
+              <button
+                onClick={() => resolveAlert.mutate({ alertId: latestAlert.id })}
+                disabled={resolveAlert.isPending}
+                className="rounded-md bg-purple-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-purple-800"
+              >
+                Mark Done
+              </button>
+            </div>
           ) : (
-            <ul className="max-h-80 space-y-2.5 overflow-y-auto pr-1">
-              {activeAlerts.map((a) => (
-                <li
-                  key={a.id}
-                  className="flex items-start justify-between gap-3 rounded-lg border border-slate-200 p-3"
-                >
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2">
-                      <span
-                        className={`rounded px-2 py-0.5 text-[11px] font-semibold ${
-                          ALERT_BADGES[a.type] ?? "bg-slate-100 text-slate-800"
-                        }`}
-                      >
-                        {a.type.replace("_", " ")}
-                      </span>
-                      <span className="font-mono text-xs text-slate-500">
-                        {formatDateTime(new Date(a.ts).toISOString())}
-                      </span>
-                    </div>
-                    <p className="text-sm text-slate-800">{a.message}</p>
-                  </div>
-                  <button
-                    onClick={() => resolveAlert.mutate({ alertId: a.id })}
-                    disabled={resolveAlert.isPending}
-                    className="shrink-0 rounded-md border border-purple-200 bg-purple-50 px-2.5 py-1 text-xs font-semibold text-purple-800 hover:bg-purple-100"
-                  >
-                    Resolve
-                  </button>
-                </li>
-              ))}
-            </ul>
+            <p className="mt-3 text-sm text-emerald-700 font-medium">
+              All clear on {currentDateLabel} — no farmer action needed right now.
+            </p>
           )}
         </section>
 
         <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-          <div className="mb-3 flex items-center justify-between">
-            <h2 className="text-base font-semibold text-slate-900">
-              Recent Operations Log
-            </h2>
-            <div className="flex gap-3 text-xs font-medium text-purple-700">
-              <Link href="/charts" className="hover:underline">
-                View Charts &rarr;
-              </Link>
-              <Link href="/whatif" className="hover:underline">
-                What-If Demo &rarr;
-              </Link>
+          <h2 className="text-sm font-bold tracking-wide text-slate-500 uppercase">
+            Why the Digital Twin Matters
+          </h2>
+          {whatIfQuery.data ? (
+            <div className="mt-3 grid grid-cols-2 gap-3">
+              <div className="rounded-lg bg-purple-50 p-3">
+                <div className="text-xs text-purple-800">Twin-Guided Swaps</div>
+                <div className="mt-1 font-mono text-2xl font-bold text-purple-900">
+                  {whatIfQuery.data.twinGuided.percentAtrazineRemoved.toFixed(0)}%
+                </div>
+                <div className="text-[11px] text-purple-700">
+                  atrazine caught
+                </div>
+              </div>
+              <div className="rounded-lg bg-slate-100 p-3">
+                <div className="text-xs text-slate-600">Fixed 1 Swap / Yr</div>
+                <div className="mt-1 font-mono text-2xl font-bold text-slate-800">
+                  {whatIfQuery.data.fixedAnnual.percentAtrazineRemoved.toFixed(0)}%
+                </div>
+                <div className="text-[11px] text-slate-600">
+                  atrazine caught
+                </div>
+              </div>
             </div>
-          </div>
-
-          {visibleEvents.length === 0 ? (
-            <p className="rounded-lg bg-slate-50 p-4 text-sm text-slate-500">
-              No logged events yet.
-            </p>
           ) : (
-            <ul className="max-h-80 space-y-2 overflow-y-auto pr-1">
-              {visibleEvents.map((ev) => (
-                <li
-                  key={ev.id}
-                  className="rounded-lg border border-slate-100 bg-slate-50 p-3 text-xs"
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="font-semibold text-purple-800 uppercase">
-                      {ev.type.replace("_", " ")}
-                    </span>
-                    <span className="font-mono text-slate-500">
-                      {formatDateTime(new Date(ev.ts).toISOString())}
-                    </span>
-                  </div>
-                  <p className="mt-1 text-slate-700">{ev.note}</p>
-                </li>
-              ))}
-            </ul>
+            <p className="mt-3 text-sm text-slate-500">Loading comparison...</p>
           )}
         </section>
       </div>
