@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 const NAV_ITEMS = [
-  { href: "/", label: "Demo" },
+  { href: "/", label: "Visual Loop" },
   { href: "/charts", label: "Graphs" },
   { href: "/startup", label: "Spring Setup" },
   { href: "/whatif", label: "Compare" },
@@ -12,6 +12,11 @@ const NAV_ITEMS = [
 
 export function NavShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+
+  // Keep "/" as a clean full-screen showcase without website chrome.
+  if (pathname === "/") {
+    return <>{children}</>;
+  }
 
   return (
     <div className="flex min-h-screen flex-col">
