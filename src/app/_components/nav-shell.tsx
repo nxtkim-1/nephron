@@ -4,10 +4,10 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 const NAV_ITEMS = [
-  { href: "/", label: "Overview" },
-  { href: "/charts", label: "Charts" },
-  { href: "/startup", label: "Start-up" },
-  { href: "/whatif", label: "What-If" },
+  { href: "/", label: "Demo" },
+  { href: "/charts", label: "Graphs" },
+  { href: "/startup", label: "Spring Setup" },
+  { href: "/whatif", label: "Compare" },
 ];
 
 export function NavShell({ children }: { children: React.ReactNode }) {

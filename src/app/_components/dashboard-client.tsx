@@ -30,13 +30,45 @@ function barColor(fraction: number) {
   return "#22c55e"; // green
 }
 
+// Turn technical alert types into plain everyday language.
+function simpleAlertText(type: string) {
+  switch (type) {
+    case "swap_soon":
+      return {
+        label: "Swap Filter Soon",
+        text: "Filter 1 is almost full. Take out Filter 1, slide Filter 2 and Filter 3 forward, and drop a fresh filter at the end.",
+      };
+    case "storm_hold":
+      return {
+        label: "Big Rain Coming",
+        text: "Heavy rain is forecast after spraying. Raise the inlet gate to hold water in the field so the filters don't get overwhelmed.",
+      };
+    case "nitrate_breakthrough":
+      return {
+        label: "Check Woodchips",
+        text: "Too much fertilizer (nitrate) is getting past the woodchips. Time to inspect the trench.",
+      };
+    case "clogging":
+      return {
+        label: "Check for a Clog",
+        text: "Water is backing up at the inlet higher than normal. Clear leaves or mud from the screen.",
+      };
+    case "ice":
+      return {
+        label: "Freezing Weather",
+        text: "Water is near freezing — watch the inlet and outlet gates for ice.",
+      };
+    default:
+      return { label: "Heads Up", text: "Check the underground filter unit." };
+  }
+}
+
 export function DashboardClient() {
   const utils = api.useUtils();
-  // Load every 6 hours (~856 points) so the slider and chart are instant and lightweight.
   const seriesQuery = api.twin.getSeries.useQuery({ stride: 6 });
   const whatIfQuery = api.whatif.compare.useQuery({ seed: 42 });
 
-  const [stepIndex, setStepIndex] = useState(235); // ~May 29
+  const [stepIndex, setStepIndex] = useState(235);
   const [isPlaying, setIsPlaying] = useState(false);
 
   const runSeason = api.sim.runSeason.useMutation({
@@ -59,7 +91,6 @@ export function DashboardClient() {
   const safeIndex = Math.min(stepIndex, maxIndex);
   const current = points[safeIndex];
 
-  // Auto-play smoothly across the season.
   useEffect(() => {
     if (!isPlaying || points.length === 0) return;
     const id = setInterval(() => {
@@ -74,7 +105,6 @@ export function DashboardClient() {
     return () => clearInterval(id);
   }, [isPlaying, points.length]);
 
-  // Build one simple chart: Twin vs. Hidden Reality + Weekly Lab Grabs.
   const chartData = useMemo(() => {
     const grabs = seriesQuery.data?.grabSamples ?? [];
     const grabByIdx = new Map<number, number>();
@@ -95,15 +125,12 @@ export function DashboardClient() {
 
     return points.map((p, i) => ({
       date: formatShortDate(p.ts),
-      twinC1: Math.round(p.twinC1 * 100),
-      truthC1: Math.round(p.truthC1 * 100),
       twinOut: p.twinOutletUgl,
       truthOut: p.truthOutletUgl,
       labDot: grabByIdx.get(i) ?? null,
     }));
   }, [points, seriesQuery.data?.grabSamples]);
 
-  // Latest unresolved alert at or before the current slider time.
   const latestAlert = useMemo(() => {
     const all = seriesQuery.data?.alerts ?? [];
     if (!current) return null;
@@ -116,7 +143,7 @@ export function DashboardClient() {
   if (seriesQuery.isLoading) {
     return (
       <div className="rounded-xl border border-slate-200 bg-white p-10 text-center text-sm text-slate-600">
-        Loading NEPHRON digital twin...
+        Loading demo...
       </div>
     );
   }
@@ -131,15 +158,15 @@ export function DashboardClient() {
           Start the NEPHRON Demo
         </h1>
         <p className="mx-auto mt-2 max-w-md text-sm text-slate-600">
-          Generate one farming season (April–October) to watch the digital twin
-          track hidden underground carbon filters.
+          Run one simulated farming season (April to October) to see how the
+          digital twin tracks buried farm filters.
         </p>
         <button
           onClick={() => runSeason.mutate({ seed: 42 })}
           disabled={runSeason.isPending}
           className="mt-5 rounded-lg bg-purple-700 px-5 py-2.5 text-sm font-semibold text-white hover:bg-purple-800 disabled:opacity-50"
         >
-          {runSeason.isPending ? "Generating season..." : "Generate Demo Season"}
+          {runSeason.isPending ? "Starting demo..." : "Start Demo Season"}
         </button>
       </div>
     );
@@ -153,6 +180,7 @@ export function DashboardClient() {
   const c1TH = Math.max(4, Math.round(current.truthC1 * 62));
   const c2TH = Math.max(4, Math.round(current.truthC2 * 62));
   const polTH = Math.max(4, Math.round(current.truthPolish * 62));
+  const alertCopy = latestAlert ? simpleAlertText(latestAlert.type) : null;
 
   return (
     <div className="space-y-6">
@@ -164,7 +192,9 @@ export function DashboardClient() {
           </div>
           <div className="mt-0.5 text-base font-bold sm:text-lg">
             {currentDateLabel} &mdash;{" "}
-            {isTreat ? "Treating tile drainage" : "Off-season (bypassing filters)"}
+            {isTreat
+              ? "Cleaning farm runoff water"
+              : "Off-season (filters resting)"}
           </div>
         </div>
 
@@ -173,7 +203,7 @@ export function DashboardClient() {
             onClick={() => setIsPlaying((p) => !p)}
             className="rounded-lg bg-white px-3.5 py-1.5 text-xs font-bold text-purple-800 hover:bg-purple-50"
           >
-            {isPlaying ? "Pause" : "Play Season"}
+            {isPlaying ? "Pause" : "Play Year"}
           </button>
           <button
             onClick={() => {
@@ -187,93 +217,131 @@ export function DashboardClient() {
             disabled={runSeason.isPending}
             className="rounded-lg border border-white/40 px-3 py-1.5 text-xs font-semibold text-white hover:bg-purple-800 disabled:opacity-50"
           >
-            {runSeason.isPending ? "Seeding..." : "New Weather"}
+            {runSeason.isPending ? "Refreshing..." : "New Weather"}
           </button>
         </div>
       </div>
 
-      {/* Block 1: Simple Visual Flow Graphic + Season Slider */}
+      {/* Block 1: Simple Picture of Water Cleaning Underground */}
       <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+          <h2 className="text-base font-bold text-slate-900">
+            How Water Gets Cleaned Underground
+          </h2>
+          <span className="text-xs font-medium text-slate-500">
+            Water flow: <strong>{current.flowLps.toFixed(2)} L/s</strong>
+          </span>
+        </div>
+
         <svg
-          viewBox="0 0 720 215"
+          viewBox="0 0 720 210"
           className="h-auto w-full"
           xmlns="http://www.w3.org/2000/svg"
         >
-          {/* Background soil band */}
-          <rect x="0" y="34" width="720" height="178" rx="12" fill="#f8fafc" stroke="#e2e8f0" />
-          <line x1="0" y1="34" x2="720" y2="34" stroke="#22c55e" strokeWidth="3" />
-          <text x="14" y="23" fill="#15803d" fontSize="11" fontWeight="700">
-            UNDERGROUND TREATMENT UNIT
-          </text>
-          <text x="706" y="23" textAnchor="end" fill="#6b21a8" fontSize="11" fontWeight="700">
-            Flow: {current.flowLps.toFixed(2)} L/s &middot; Mode: {isTreat ? "TREAT" : "BYPASS"}
+          <rect
+            x="0"
+            y="26"
+            width="720"
+            height="182"
+            rx="12"
+            fill="#f8fafc"
+            stroke="#e2e8f0"
+          />
+          <line x1="0" y1="26" x2="720" y2="26" stroke="#22c55e" strokeWidth="3" />
+          <text x="14" y="17" fill="#15803d" fontSize="11" fontWeight="700">
+            FARM FIELD SURFACE (UNIT IS BURIED BELOW)
           </text>
 
-          {/* 1. Tile Drain */}
-          <rect x="14" y="84" width="96" height="72" rx="10" fill="#ffffff" stroke="#cbd5e1" strokeWidth="1.5" />
-          <text x="62" y="106" textAnchor="middle" fill="#64748b" fontSize="9.5" fontWeight="700">
-            TILE DRAIN
+          {/* 1. Dirty Farm Water */}
+          <rect
+            x="14"
+            y="78"
+            width="100"
+            height="74"
+            rx="10"
+            fill="#ffffff"
+            stroke="#cbd5e1"
+            strokeWidth="1.5"
+          />
+          <text x="64" y="99" textAnchor="middle" fill="#64748b" fontSize="9.5" fontWeight="700">
+            1. FARM RUNOFF
           </text>
-          <text x="62" y="127" textAnchor="middle" fill="#7e22ce" fontSize="14" fontWeight="800">
+          <text x="64" y="121" textAnchor="middle" fill="#7e22ce" fontSize="14" fontWeight="800">
             {current.inletAtrazineUgl.toFixed(1)} &mu;g/L
           </text>
-          <text x="62" y="143" textAnchor="middle" fill="#64748b" fontSize="9.5">
-            Atrazine in
+          <text x="64" y="138" textAnchor="middle" fill="#64748b" fontSize="9.5">
+            Weed-killer in
           </text>
 
-          {/* Arrow 1 -> 2 */}
-          <line x1="110" y1="120" x2="138" y2="120" stroke="#9333ea" strokeWidth="4" />
-          <polygon points="138,114 148,120 138,126" fill="#9333ea" />
+          <line x1="114" y1="115" x2="140" y2="115" stroke="#9333ea" strokeWidth="4" />
+          <polygon points="140,109 150,115 140,121" fill="#9333ea" />
 
-          {/* 2. Inlet Gate */}
-          <rect x="148" y="84" width="88" height="72" rx="10" fill="#ffffff" stroke="#cbd5e1" strokeWidth="1.5" />
-          <text x="192" y="105" textAnchor="middle" fill="#64748b" fontSize="9.5" fontWeight="700">
-            INLET BOX
+          {/* 2. Season Gate */}
+          <rect
+            x="150"
+            y="78"
+            width="86"
+            height="74"
+            rx="10"
+            fill="#ffffff"
+            stroke="#cbd5e1"
+            strokeWidth="1.5"
+          />
+          <text x="193" y="99" textAnchor="middle" fill="#64748b" fontSize="9.5" fontWeight="700">
+            2. GATE
           </text>
           <rect
-            x="164"
-            y="113"
-            width="56"
+            x="163"
+            y="108"
+            width="60"
             height="22"
             rx="6"
             fill={isTreat ? "#dcfce7" : "#e2e8f0"}
           />
           <text
-            x="192"
-            y="128"
+            x="193"
+            y="123"
             textAnchor="middle"
             fill={isTreat ? "#166534" : "#334155"}
             fontSize="10.5"
             fontWeight="800"
           >
-            {isTreat ? "TREAT" : "BYPASS"}
+            {isTreat ? "CLEANING" : "BYPASS"}
           </text>
-          <text x="192" y="148" textAnchor="middle" fill="#64748b" fontSize="9">
-            300 m&sup3; basin
+          <text x="193" y="143" textAnchor="middle" fill="#64748b" fontSize="9">
+            Storm tank
           </text>
 
-          {/* Arrow 2 -> 3 */}
           <line
             x1="236"
-            y1="120"
+            y1="115"
             x2="262"
-            y2="120"
+            y2="115"
             stroke={isTreat ? "#9333ea" : "#cbd5e1"}
             strokeWidth="4"
           />
           <polygon
-            points="262,114 272,120 262,126"
+            points="262,109 272,115 262,121"
             fill={isTreat ? "#9333ea" : "#cbd5e1"}
           />
 
           {/* 3. Woodchips */}
-          <rect x="272" y="84" width="104" height="72" rx="10" fill="#fffbeb" stroke="#fcd34d" strokeWidth="1.5" />
-          <text x="324" y="105" textAnchor="middle" fill="#92400e" fontSize="9.5" fontWeight="700">
-            WOODCHIPS
+          <rect
+            x="272"
+            y="78"
+            width="104"
+            height="74"
+            rx="10"
+            fill="#fffbeb"
+            stroke="#fcd34d"
+            strokeWidth="1.5"
+          />
+          <text x="324" y="99" textAnchor="middle" fill="#92400e" fontSize="9.5" fontWeight="700">
+            3. WOODCHIPS
           </text>
           <text
             x="324"
-            y="127"
+            y="121"
             textAnchor="middle"
             fill={current.nitrateAfterChipsMgl > 5 ? "#dc2626" : "#15803d"}
             fontSize="13.5"
@@ -281,80 +349,98 @@ export function DashboardClient() {
           >
             {current.nitrateAfterChipsMgl.toFixed(1)} mg/L
           </text>
-          <text x="324" y="143" textAnchor="middle" fill="#92400e" fontSize="9.5">
-            Nitrate out
+          <text x="324" y="138" textAnchor="middle" fill="#92400e" fontSize="9.5">
+            Fertilizer left
           </text>
 
-          {/* Arrow 3 -> 4 */}
           <line
             x1="376"
-            y1="120"
+            y1="115"
             x2="402"
-            y2="120"
+            y2="115"
             stroke={isTreat ? "#9333ea" : "#cbd5e1"}
             strokeWidth="4"
           />
           <polygon
-            points="402,114 412,120 402,126"
+            points="402,109 412,115 402,121"
             fill={isTreat ? "#9333ea" : "#cbd5e1"}
           />
 
-          {/* 4. Carbon Box (3 cartridges) */}
-          <rect x="412" y="54" width="164" height="132" rx="12" fill="#faf5ff" stroke="#9333ea" strokeWidth="2" />
-          <text x="494" y="72" textAnchor="middle" fill="#6b21a8" fontSize="10" fontWeight="800">
-            CARBON FILTERS
+          {/* 4. Carbon Filters */}
+          <rect
+            x="412"
+            y="48"
+            width="164"
+            height="132"
+            rx="12"
+            fill="#faf5ff"
+            stroke="#9333ea"
+            strokeWidth="2"
+          />
+          <text x="494" y="66" textAnchor="middle" fill="#6b21a8" fontSize="10" fontWeight="800">
+            4. CARBON FILTERS
           </text>
 
-          {/* C1 */}
-          <text x="444" y="88" textAnchor="middle" fill="#475569" fontSize="9" fontWeight="700">C1</text>
-          <rect x="426" y="93" width="36" height="66" rx="5" fill="#e2e8f0" />
-          <rect x="428" y={157 - c1H} width="32" height={c1H} rx="3" fill={barColor(current.twinC1)} />
-          <line x1="426" y1={157 - c1TH} x2="462" y2={157 - c1TH} stroke="#0f172a" strokeWidth="2" strokeDasharray="3 2" />
-          <text x="444" y="174" textAnchor="middle" fill="#0f172a" fontSize="10" fontWeight="700">
+          <text x="444" y="82" textAnchor="middle" fill="#475569" fontSize="9" fontWeight="700">
+            Filter 1
+          </text>
+          <rect x="426" y="87" width="36" height="66" rx="5" fill="#e2e8f0" />
+          <rect x="428" y={151 - c1H} width="32" height={c1H} rx="3" fill={barColor(current.twinC1)} />
+          <line x1="426" y1={151 - c1TH} x2="462" y2={151 - c1TH} stroke="#0f172a" strokeWidth="2" strokeDasharray="3 2" />
+          <text x="444" y="168" textAnchor="middle" fill="#0f172a" fontSize="10" fontWeight="700">
             {Math.round(current.twinC1 * 100)}%
           </text>
 
-          {/* C2 */}
-          <text x="494" y="88" textAnchor="middle" fill="#475569" fontSize="9" fontWeight="700">C2</text>
-          <rect x="476" y="93" width="36" height="66" rx="5" fill="#e2e8f0" />
-          <rect x="478" y={157 - c2H} width="32" height={c2H} rx="3" fill={barColor(current.twinC2)} />
-          <line x1="476" y1={157 - c2TH} x2="512" y2={157 - c2TH} stroke="#0f172a" strokeWidth="2" strokeDasharray="3 2" />
-          <text x="494" y="174" textAnchor="middle" fill="#0f172a" fontSize="10" fontWeight="700">
+          <text x="494" y="82" textAnchor="middle" fill="#475569" fontSize="9" fontWeight="700">
+            Filter 2
+          </text>
+          <rect x="476" y="87" width="36" height="66" rx="5" fill="#e2e8f0" />
+          <rect x="478" y={151 - c2H} width="32" height={c2H} rx="3" fill={barColor(current.twinC2)} />
+          <line x1="476" y1={151 - c2TH} x2="512" y2={151 - c2TH} stroke="#0f172a" strokeWidth="2" strokeDasharray="3 2" />
+          <text x="494" y="168" textAnchor="middle" fill="#0f172a" fontSize="10" fontWeight="700">
             {Math.round(current.twinC2 * 100)}%
           </text>
 
-          {/* Polish */}
-          <text x="544" y="88" textAnchor="middle" fill="#475569" fontSize="9" fontWeight="700">POL</text>
-          <rect x="526" y="93" width="36" height="66" rx="5" fill="#e2e8f0" />
-          <rect x="528" y={157 - polH} width="32" height={polH} rx="3" fill={barColor(current.twinPolish)} />
-          <line x1="526" y1={157 - polTH} x2="562" y2={157 - polTH} stroke="#0f172a" strokeWidth="2" strokeDasharray="3 2" />
-          <text x="544" y="174" textAnchor="middle" fill="#0f172a" fontSize="10" fontWeight="700">
+          <text x="544" y="82" textAnchor="middle" fill="#475569" fontSize="9" fontWeight="700">
+            Backup
+          </text>
+          <rect x="526" y="87" width="36" height="66" rx="5" fill="#e2e8f0" />
+          <rect x="528" y={151 - polH} width="32" height={polH} rx="3" fill={barColor(current.twinPolish)} />
+          <line x1="526" y1={151 - polTH} x2="562" y2={151 - polTH} stroke="#0f172a" strokeWidth="2" strokeDasharray="3 2" />
+          <text x="544" y="168" textAnchor="middle" fill="#0f172a" fontSize="10" fontWeight="700">
             {Math.round(current.twinPolish * 100)}%
           </text>
 
-          {/* Arrow 4 -> 5 */}
-          <line x1="576" y1="120" x2="602" y2="120" stroke="#0ea5e9" strokeWidth="4" />
-          <polygon points="602,114 612,120 602,126" fill="#0ea5e9" />
+          <line x1="576" y1="115" x2="602" y2="115" stroke="#0ea5e9" strokeWidth="4" />
+          <polygon points="602,109 612,115 602,121" fill="#0ea5e9" />
 
-          {/* 5. Outlet / Ditch */}
-          <rect x="612" y="84" width="94" height="72" rx="10" fill="#f0f9ff" stroke="#38bdf8" strokeWidth="1.5" />
-          <text x="659" y="105" textAnchor="middle" fill="#0369a1" fontSize="9.5" fontWeight="700">
-            CLEAN DITCH
+          {/* 5. Clean Water Out */}
+          <rect
+            x="612"
+            y="78"
+            width="94"
+            height="74"
+            rx="10"
+            fill="#f0f9ff"
+            stroke="#38bdf8"
+            strokeWidth="1.5"
+          />
+          <text x="659" y="99" textAnchor="middle" fill="#0369a1" fontSize="9.5" fontWeight="700">
+            5. CLEAN WATER
           </text>
-          <text x="659" y="127" textAnchor="middle" fill="#0284c7" fontSize="14" fontWeight="800">
+          <text x="659" y="121" textAnchor="middle" fill="#0284c7" fontSize="14" fontWeight="800">
             {current.twinOutletUgl.toFixed(2)} &mu;g/L
           </text>
-          <text x="659" y="143" textAnchor="middle" fill="#0369a1" fontSize="9.5">
-            Truth: {current.truthOutletUgl.toFixed(2)}
+          <text x="659" y="138" textAnchor="middle" fill="#0369a1" fontSize="9.5">
+            Real: {current.truthOutletUgl.toFixed(2)}
           </text>
 
-          {/* Simple legend */}
-          <text x="14" y="202" fill="#64748b" fontSize="9.5">
-            Colored bars = Digital Twin estimate (green &lt;60%, amber 60–85%, red &gt;85%) &middot; Dashed line = hidden real filter
+          <text x="14" y="197" fill="#64748b" fontSize="9.5">
+            Color bars = Twin&apos;s guess (green = fresh, yellow = half full, red = swap soon) &middot; Dashed line = Real buried filter
           </text>
         </svg>
 
-        {/* Simple Season Slider */}
+        {/* Simple Date Slider */}
         <div className="mt-4 flex flex-col gap-1.5">
           <input
             type="range"
@@ -368,24 +454,24 @@ export function DashboardClient() {
             className="w-full accent-purple-700"
           />
           <div className="flex justify-between text-xs text-slate-500">
-            <span>Apr 1 (Start-up)</span>
-            <span>May 10 (Spray Day)</span>
-            <span>Jul–Sep (Swaps)</span>
-            <span>Oct 31 (Off-Season)</span>
+            <span>April (Start)</span>
+            <span>May (Spraying)</span>
+            <span>Summer (Swapping Filters)</span>
+            <span>October (Off-Season)</span>
           </div>
         </div>
       </section>
 
-      {/* Block 2: One Simple Chart — Twin Estimate vs. Hidden Reality */}
+      {/* Block 2: One Simple Graph */}
       <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
         <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
           <div>
             <h2 className="text-base font-bold text-slate-900">
-              How the Twin Learns: Outlet Atrazine (&mu;g/L)
+              How the Twin Learns Over the Year
             </h2>
             <p className="text-xs text-slate-500">
-              The twin starts off guessing 30% too slow, then weekly lab samples
-              (orange dots) pull its estimate onto the hidden truth.
+              Our twin starts off guessing a little wrong. Each week, a real
+              water test (orange dot) corrects it so it matches reality.
             </p>
           </div>
           <span className="rounded bg-purple-50 px-2 py-0.5 text-[11px] font-medium text-purple-800">
@@ -398,7 +484,7 @@ export function DashboardClient() {
             <ComposedChart data={chartData}>
               <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
               <XAxis dataKey="date" tick={{ fontSize: 11 }} minTickGap={35} />
-              <YAxis tick={{ fontSize: 11 }} unit=" ug/L" width={62} />
+              <YAxis tick={{ fontSize: 11 }} width={48} />
               <Tooltip />
               <Legend wrapperStyle={{ fontSize: 12 }} />
               <ReferenceLine
@@ -409,7 +495,7 @@ export function DashboardClient() {
               <Line
                 type="monotone"
                 dataKey="twinOut"
-                name="Digital Twin Estimate"
+                name="Twin's Guess (weed-killer out)"
                 stroke="#7e22ce"
                 strokeWidth={2.2}
                 dot={false}
@@ -417,7 +503,7 @@ export function DashboardClient() {
               <Line
                 type="monotone"
                 dataKey="truthOut"
-                name="Hidden Real Plant"
+                name="Real Water Out (hidden)"
                 stroke="#10b981"
                 strokeWidth={2}
                 strokeDasharray="5 4"
@@ -425,7 +511,7 @@ export function DashboardClient() {
               />
               <Scatter
                 dataKey="labDot"
-                name="Weekly Lab Sample"
+                name="Weekly Water Test"
                 fill="#ea580c"
               />
             </ComposedChart>
@@ -433,20 +519,20 @@ export function DashboardClient() {
         </div>
       </section>
 
-      {/* Block 3: Two Simple Cards — Farmer Action + Why It Matters */}
+      {/* Block 3: Two Plain-English Cards */}
       <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
         <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
           <h2 className="text-sm font-bold tracking-wide text-slate-500 uppercase">
-            What the Farmer Should Do
+            What the Farmer Should Do Now
           </h2>
-          {latestAlert ? (
+          {latestAlert && alertCopy ? (
             <div className="mt-3 space-y-3">
-              <div className="inline-block rounded bg-amber-100 px-2 py-0.5 text-xs font-bold text-amber-900 uppercase">
-                {latestAlert.type.replace("_", " ")} &middot;{" "}
+              <div className="inline-block rounded bg-amber-100 px-2 py-0.5 text-xs font-bold text-amber-900">
+                {alertCopy.label} &middot;{" "}
                 {formatShortDate(new Date(latestAlert.ts).toISOString())}
               </div>
               <p className="text-sm font-medium text-slate-900">
-                {latestAlert.message}
+                {alertCopy.text}
               </p>
               <button
                 onClick={() => resolveAlert.mutate({ alertId: latestAlert.id })}
@@ -457,34 +543,43 @@ export function DashboardClient() {
               </button>
             </div>
           ) : (
-            <p className="mt-3 text-sm text-emerald-700 font-medium">
-              All clear on {currentDateLabel} — no farmer action needed right now.
+            <p className="mt-3 text-sm font-medium text-emerald-700">
+              Everything looks good on {currentDateLabel} — nothing to do right
+              now.
             </p>
           )}
         </section>
 
         <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
           <h2 className="text-sm font-bold tracking-wide text-slate-500 uppercase">
-            Why the Digital Twin Matters
+            Why Using the Twin Helps
           </h2>
           {whatIfQuery.data ? (
             <div className="mt-3 grid grid-cols-2 gap-3">
               <div className="rounded-lg bg-purple-50 p-3">
-                <div className="text-xs text-purple-800">Twin-Guided Swaps</div>
+                <div className="text-xs font-medium text-purple-800">
+                  With Digital Twin
+                </div>
                 <div className="mt-1 font-mono text-2xl font-bold text-purple-900">
-                  {whatIfQuery.data.twinGuided.percentAtrazineRemoved.toFixed(0)}%
+                  {whatIfQuery.data.twinGuided.percentAtrazineRemoved.toFixed(0)}
+                  %
                 </div>
                 <div className="text-[11px] text-purple-700">
-                  atrazine caught
+                  of weed-killer caught
                 </div>
               </div>
               <div className="rounded-lg bg-slate-100 p-3">
-                <div className="text-xs text-slate-600">Fixed 1 Swap / Yr</div>
+                <div className="text-xs font-medium text-slate-600">
+                  Swapping Once a Year
+                </div>
                 <div className="mt-1 font-mono text-2xl font-bold text-slate-800">
-                  {whatIfQuery.data.fixedAnnual.percentAtrazineRemoved.toFixed(0)}%
+                  {whatIfQuery.data.fixedAnnual.percentAtrazineRemoved.toFixed(
+                    0,
+                  )}
+                  %
                 </div>
                 <div className="text-[11px] text-slate-600">
-                  atrazine caught
+                  of weed-killer caught
                 </div>
               </div>
             </div>
