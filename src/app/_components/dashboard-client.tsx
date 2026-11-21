@@ -2,7 +2,7 @@
 
 import "@xyflow/react/dist/style.css";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
   Background,
@@ -456,20 +456,15 @@ export function DashboardClient() {
 
   const [paused, setPaused] = useState(false);
   const [progress, setProgress] = useState(0.2);
-  const lastTsRef = useRef<number | null>(null);
 
+  // Calm 4-fps simulation clock (CSS transitions smoothly interpolate the filter bars).
   useEffect(() => {
-    let rafId = 0;
-    const tick = (now: number) => {
-      if (lastTsRef.current !== null && !paused) {
-        const dt = Math.min(0.1, (now - lastTsRef.current) / 1000);
-        setProgress((p) => (p + dt / LOOP_DURATION_SEC) % 1);
-      }
-      lastTsRef.current = now;
-      rafId = requestAnimationFrame(tick);
-    };
-    rafId = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(rafId);
+    if (paused) return;
+    const stepMs = 250;
+    const id = setInterval(() => {
+      setProgress((p) => (p + stepMs / 1000 / LOOP_DURATION_SEC) % 1);
+    }, stepMs);
+    return () => clearInterval(id);
   }, [paused]);
 
   const exactIdx = progress * (sim.frames.length - 1);
@@ -515,13 +510,13 @@ export function DashboardClient() {
       {
         id: "farmer",
         type: "farmer",
-        position: { x: 140, y: 42 },
+        position: { x: 165, y: 42 },
         data: { message: farmerMessage, isSwap },
       },
       {
         id: "phoneTwin",
         type: "phoneTwin",
-        position: { x: 500, y: 12 },
+        position: { x: 545, y: 12 },
         data: {
           c1,
           c2,
@@ -534,33 +529,33 @@ export function DashboardClient() {
       {
         id: "waterSample",
         type: "waterSample",
-        position: { x: 860, y: 42 },
+        position: { x: 925, y: 42 },
         data: { active: isWaterCheck },
       },
 
-      // Bottom row: Buried underground treatment train
+      // Bottom row: Buried underground treatment train (generous spacing for edge labels)
       {
         id: "runoff",
         type: "runoff",
-        position: { x: 20, y: 266 },
+        position: { x: 0, y: 266 },
         data: { isStorm, isSprayHeavy, isTreat },
       },
       {
         id: "woodchips",
         type: "woodchips",
-        position: { x: 264, y: 274 },
+        position: { x: 286, y: 274 },
         data: { isTreat },
       },
       {
         id: "carbon",
         type: "carbon",
-        position: { x: 476, y: 228 },
+        position: { x: 520, y: 228 },
         data: { c1, c2, c3, c1R, c2R, c3R, isSwap, isTreat },
       },
       {
         id: "cleanWater",
         type: "cleanWater",
-        position: { x: 860, y: 274 },
+        position: { x: 925, y: 274 },
         data: { isTreat },
       },
     ],
@@ -781,13 +776,18 @@ export function DashboardClient() {
           nodes={nodes}
           edges={edges}
           nodeTypes={NODE_TYPES}
+          className="light"
+          style={{ backgroundColor: "#fafaf9" }}
+          minZoom={0.2}
+          maxZoom={1.5}
           fitView
-          fitViewOptions={{ padding: 0.16 }}
+          fitViewOptions={{ padding: 0.14 }}
           nodesConnectable={false}
           proOptions={{ hideAttribution: true }}
         >
           <Background
             variant={BackgroundVariant.Dots}
+            bgColor="#fafaf9"
             gap={20}
             size={1.2}
             color="#d6d3d1"
