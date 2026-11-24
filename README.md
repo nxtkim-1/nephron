@@ -4,6 +4,32 @@
 
 > **Synthetic data: demonstration only.** No live farm sensors are connected; a built-in simulator generates a hidden ground-truth plant and noisy sensor readings so the digital twin can demonstrate real-time tracking and calibration.
 
+## Architecture
+
+The constraint this project is built around: **the twin never sees the truth; it may only believe what a noisy sensor or a late lab sample could have told it.**
+
+```mermaid
+%%{init: {"theme": "base", "themeVariables": {"primaryColor": "#f2f5ff", "primaryBorderColor": "#445566", "primaryTextColor": "#111111", "lineColor": "#333333", "fontSize": "15px"}}}%%
+flowchart LR
+  SIM["Simulator<br/>hidden truth"] --> SENS["Noisy sensors +<br/>late lab samples"]
+  MOD["Hourly physical model"] --> TWIN["Digital twin<br/>half-step correction"]
+  SENS --> TWIN
+  TWIN --> AL["Farmer alerts"]
+  MOD --> WI["What-if swap comparison"]
+  TWIN --> API["tRPC API"]
+  DB[("Neon Postgres")] --> API
+  API --> UI["Next.js pages"]
+  linkStyle default stroke:#333333,stroke-width:1.5px,color:#111111
+```
+
+1. A hidden simulator plays the real plant: it fouls faster than the twin expects and injects failure events. Nothing in the twin reads the hidden state directly.
+2. The twin runs the hourly physical model on what the sensors and lab samples could tell it: continuous readings with 5% noise, and weekly grab samples with 10% noise that arrive two days late.
+3. When a grab sample lands, the twin finds the cartridge-capacity shift that explains the measurement (bisection on the adsorption model) and moves its estimates halfway toward it.
+4. Alerts are raised only from the twin's own estimates and forecasts, for example a 7-day breakthrough forecast above 0.1 ug/L triggers swap_soon.
+5. The what-if page compares twin-guided cartridge swaps against a fixed annual swap on the same simulated season.
+
+Design decisions and limits: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
 ## What NEPHRON Does
 NEPHRON is a buried treatment unit placed at a farm tile-drain outlet to remove the herbicide atrazine and nitrate before drainage reaches surface ditches:
 
